@@ -1,0 +1,16 @@
+google-api-python-client
+google-auth
+google-auth-httplib2
+google-auth-oauthlib
+python-dotenv
+rich
+diffusers
+transformers
+accelerate
+safetensors
+sentencepiece
+protobuf
+pillow
+huggingface_hub
+ftfy
+einops

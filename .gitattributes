@@ -1,0 +1,18 @@
+# Normalize to LF in the repository; check out with the platform's native endings.
+* text=auto
+
+# Always LF — these run on Linux nodes.
+*.sh    text eol=lf
+*.py    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+
+# Binary media (README previews) — never touch, never diff.
+*.mp4  binary
+*.gif  binary
+*.jpg  binary
+*.png  binary
+*.mp3  binary
+
+# Keep generated data out of diffs but still versioned.
+*.jsonl -diff

@@ -1,0 +1,75 @@
+{"ts": "2026-06-25T16:43:53", "stage": "stage_01_story", "step": "process_total", "kind": "total", "seconds": 818.6, "note": "api_single_worker"}
+{"ts": "2026-06-25T16:44:40", "stage": "stage_02_narration", "step": "fish_load", "kind": "load", "seconds": 40.309}
+{"ts": "2026-06-25T16:46:48", "stage": "stage_02_narration", "step": "tts_generate", "kind": "infer", "seconds": 128.457, "chunks": 8}
+{"ts": "2026-06-25T16:46:49", "stage": "stage_02_narration", "step": "decode_to_audio", "kind": "infer", "seconds": 1.116}
+{"ts": "2026-06-25T16:46:50", "stage": "stage_02_narration", "step": "mp3_encode", "kind": "cpu", "seconds": 0.341}
+{"ts": "2026-06-25T16:46:52", "stage": "stage_02_narration", "step": "whisperx_load", "kind": "load", "seconds": 1.731}
+{"ts": "2026-06-25T16:46:52", "stage": "stage_02_narration", "step": "whisperx_transcribe", "kind": "infer", "seconds": 0.372}
+{"ts": "2026-06-25T16:46:52", "stage": "stage_02_narration", "step": "align_model_load", "kind": "load", "seconds": 0.488}
+{"ts": "2026-06-25T16:46:53", "stage": "stage_02_narration", "step": "whisperx_align", "kind": "infer", "seconds": 0.439}
+{"ts": "2026-06-25T16:46:53", "stage": "stage_02_narration", "step": "char_map", "kind": "cpu", "seconds": 0.001}
+{"ts": "2026-06-25T16:47:03", "stage": "stage_02_narration", "step": "process_total", "kind": "total", "seconds": 186.975, "story": 1}
+{"ts": "2026-06-25T16:47:47", "stage": "stage_03_images", "step": "flux_load", "kind": "load", "seconds": 6.326}
+{"ts": "2026-06-25T16:48:01", "stage": "stage_03_images", "step": "flux_generate", "kind": "infer", "seconds": 13.979, "n": 4, "steps": 4}
+{"ts": "2026-06-25T16:48:05", "stage": "stage_03_images", "step": "image_upload", "kind": "io", "seconds": 3.957}
+{"ts": "2026-06-25T16:48:09", "stage": "stage_03_images", "step": "image_upload", "kind": "io", "seconds": 3.845}
+{"ts": "2026-06-25T16:48:13", "stage": "stage_03_images", "step": "image_upload", "kind": "io", "seconds": 3.328}
+{"ts": "2026-06-25T16:48:17", "stage": "stage_03_images", "step": "image_upload", "kind": "io", "seconds": 3.585}
+{"ts": "2026-06-25T16:48:30", "stage": "stage_03_images", "step": "flux_generate", "kind": "infer", "seconds": 13.398, "n": 4, "steps": 4}
+{"ts": "2026-06-25T16:48:34", "stage": "stage_03_images", "step": "image_upload", "kind": "io", "seconds": 3.644}
+{"ts": "2026-06-25T16:48:37", "stage": "stage_03_images", "step": "image_upload", "kind": "io", "seconds": 3.332}
+{"ts": "2026-06-25T16:48:41", "stage": "stage_03_images", "step": "image_upload", "kind": "io", "seconds": 3.343}
+{"ts": "2026-06-25T16:48:44", "stage": "stage_03_images", "step": "image_upload", "kind": "io", "seconds": 3.474}
+{"ts": "2026-06-25T16:48:58", "stage": "stage_03_images", "step": "flux_generate", "kind": "infer", "seconds": 13.435, "n": 4, "steps": 4}
+{"ts": "2026-06-25T16:49:01", "stage": "stage_03_images", "step": "image_upload", "kind": "io", "seconds": 3.48}
+{"ts": "2026-06-25T16:49:05", "stage": "stage_03_images", "step": "image_upload", "kind": "io", "seconds": 3.548}
+{"ts": "2026-06-25T16:49:09", "stage": "stage_03_images", "step": "image_upload", "kind": "io", "seconds": 3.411}
+{"ts": "2026-06-25T16:49:12", "stage": "stage_03_images", "step": "image_upload", "kind": "io", "seconds": 3.55}
+{"ts": "2026-06-25T16:49:26", "stage": "stage_03_images", "step": "flux_generate", "kind": "infer", "seconds": 13.545, "n": 4, "steps": 4}
+{"ts": "2026-06-25T16:49:30", "stage": "stage_03_images", "step": "image_upload", "kind": "io", "seconds": 3.621}
+{"ts": "2026-06-25T16:49:33", "stage": "stage_03_images", "step": "image_upload", "kind": "io", "seconds": 3.201}
+{"ts": "2026-06-25T16:49:37", "stage": "stage_03_images", "step": "image_upload", "kind": "io", "seconds": 3.504}
+{"ts": "2026-06-25T16:49:40", "stage": "stage_03_images", "step": "image_upload", "kind": "io", "seconds": 3.311}
+{"ts": "2026-06-25T16:49:54", "stage": "stage_03_images", "step": "flux_generate", "kind": "infer", "seconds": 13.568, "n": 4, "steps": 4}
+{"ts": "2026-06-25T16:49:57", "stage": "stage_03_images", "step": "image_upload", "kind": "io", "seconds": 3.601}
+{"ts": "2026-06-25T16:50:01", "stage": "stage_03_images", "step": "image_upload", "kind": "io", "seconds": 3.341}
+{"ts": "2026-06-25T16:50:05", "stage": "stage_03_images", "step": "image_upload", "kind": "io", "seconds": 3.444}
+{"ts": "2026-06-25T16:50:08", "stage": "stage_03_images", "step": "image_upload", "kind": "io", "seconds": 3.681}
+{"ts": "2026-06-25T16:50:22", "stage": "stage_03_images", "step": "flux_generate", "kind": "infer", "seconds": 13.572, "n": 4, "steps": 4}
+{"ts": "2026-06-25T16:50:26", "stage": "stage_03_images", "step": "image_upload", "kind": "io", "seconds": 3.58}
+{"ts": "2026-06-25T16:50:31", "stage": "stage_03_images", "step": "image_upload", "kind": "io", "seconds": 4.727}
+{"ts": "2026-06-25T16:50:34", "stage": "stage_03_images", "step": "image_upload", "kind": "io", "seconds": 3.647}
+{"ts": "2026-06-25T16:50:38", "stage": "stage_03_images", "step": "image_upload", "kind": "io", "seconds": 3.838}
+{"ts": "2026-06-25T16:50:52", "stage": "stage_03_images", "step": "flux_generate", "kind": "infer", "seconds": 13.668, "n": 4, "steps": 4}
+{"ts": "2026-06-25T16:50:56", "stage": "stage_03_images", "step": "image_upload", "kind": "io", "seconds": 3.602}
+{"ts": "2026-06-25T16:50:59", "stage": "stage_03_images", "step": "image_upload", "kind": "io", "seconds": 3.234}
+{"ts": "2026-06-25T16:51:03", "stage": "stage_03_images", "step": "image_upload", "kind": "io", "seconds": 3.295}
+{"ts": "2026-06-25T16:51:06", "stage": "stage_03_images", "step": "image_upload", "kind": "io", "seconds": 3.293}
+{"ts": "2026-06-25T16:51:20", "stage": "stage_03_images", "step": "flux_generate", "kind": "infer", "seconds": 13.601, "n": 4, "steps": 4}
+{"ts": "2026-06-25T16:51:23", "stage": "stage_03_images", "step": "image_upload", "kind": "io", "seconds": 3.582}
+{"ts": "2026-06-25T16:51:27", "stage": "stage_03_images", "step": "image_upload", "kind": "io", "seconds": 3.462}
+{"ts": "2026-06-25T16:51:31", "stage": "stage_03_images", "step": "image_upload", "kind": "io", "seconds": 3.445}
+{"ts": "2026-06-25T16:51:34", "stage": "stage_03_images", "step": "image_upload", "kind": "io", "seconds": 3.381}
+{"ts": "2026-06-25T16:51:41", "stage": "stage_03_images", "step": "flux_generate", "kind": "infer", "seconds": 6.648, "n": 2, "steps": 4}
+{"ts": "2026-06-25T16:51:45", "stage": "stage_03_images", "step": "image_upload", "kind": "io", "seconds": 3.442}
+{"ts": "2026-06-25T16:51:48", "stage": "stage_03_images", "step": "image_upload", "kind": "io", "seconds": 3.527}
+{"ts": "2026-06-25T16:51:48", "stage": "stage_03_images", "step": "process_total", "kind": "total", "seconds": 266.818, "story": 1}
+{"ts": "2026-06-25T17:18:24", "stage": "stage_04_music", "step": "qwen_load", "kind": "load", "seconds": 12.375}
+{"ts": "2026-06-25T17:18:45", "stage": "stage_04_music", "step": "brief_pass1", "kind": "infer", "seconds": 35.8}
+{"ts": "2026-06-25T17:19:10", "stage": "stage_04_music", "step": "ace_load", "kind": "load", "seconds": 22.521}
+{"ts": "2026-06-25T17:19:21", "stage": "stage_04_music", "step": "ace_generate_pass1", "kind": "infer", "seconds": 10.146, "steps": 12, "duration": 60}
+{"ts": "2026-06-25T17:19:30", "stage": "stage_04_music", "step": "process_total", "kind": "total", "seconds": 82.605, "story": 1}
+{"ts": "2026-06-25T18:56:26", "stage": "stage_05_compose", "step": "assets_download", "kind": "io", "seconds": 58.765, "images": 34}
+{"ts": "2026-06-25T18:56:46", "stage": "stage_05_compose", "step": "frames_prep", "kind": "cpu", "seconds": 19.873, "n": 34}
+{"ts": "2026-06-25T18:56:46", "stage": "stage_05_compose", "step": "ass_build", "kind": "cpu", "seconds": 0.001}
+{"ts": "2026-06-25T18:56:46", "stage": "stage_05_compose", "step": "lufs_measure", "kind": "cpu", "seconds": 0.283}
+{"ts": "2026-06-25T18:57:09", "stage": "stage_05_compose", "step": "ffmpeg_encode", "kind": "cpu", "seconds": 22.742, "encoder": "nvenc", "scenes": 34}
+{"ts": "2026-06-25T18:57:09", "stage": "stage_05_compose", "step": "compose_video", "kind": "cpu", "seconds": 42.937}
+{"ts": "2026-06-25T18:57:24", "stage": "stage_05_compose", "step": "process_total", "kind": "total", "seconds": 119.393, "story": 1}
+{"ts": "2026-06-25T19:40:56", "stage": "stage_05_compose", "step": "assets_download", "kind": "io", "seconds": 64.11, "images": 34}
+{"ts": "2026-06-25T19:41:16", "stage": "stage_05_compose", "step": "frames_prep", "kind": "cpu", "seconds": 20.116, "n": 34}
+{"ts": "2026-06-25T19:41:16", "stage": "stage_05_compose", "step": "ass_build", "kind": "cpu", "seconds": 0.001}
+{"ts": "2026-06-25T19:41:17", "stage": "stage_05_compose", "step": "lufs_measure", "kind": "cpu", "seconds": 0.273}
+{"ts": "2026-06-25T19:41:41", "stage": "stage_05_compose", "step": "ffmpeg_encode", "kind": "cpu", "seconds": 24.591, "encoder": "nvenc", "scenes": 34}
+{"ts": "2026-06-25T19:41:41", "stage": "stage_05_compose", "step": "compose_video", "kind": "cpu", "seconds": 45.013}
+{"ts": "2026-06-25T19:41:59", "stage": "stage_05_compose", "step": "process_total", "kind": "total", "seconds": 129.614, "story": 1}

@@ -1,0 +1,82 @@
+# ── Secrets (NEVER commit) ────────────────────────────────────────────────────
+.env
+credentials.json
+secrets.json
+token.json
+client_secret*.json
+drive_sa_key.json
+*.ig_session.json
+.ig_session.json
+*.session
+*.pem
+*.key
+
+# ── Environments ──────────────────────────────────────────────────────────────
+.venv
+.venv_*/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# ── State / database ──────────────────────────────────────────────────────────
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.db
+manifest.sqlite
+videos.csv
+videos.json
+
+# ── Byte-compiled ─────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ── Model weights & caches (tens of GB — provisioned by scripts/setup_*.py) ───
+models/
+.cache/
+huggingface/
+checkpoints/
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+
+# ── Generated pipeline output (local disk is scratch; Drive is the store) ─────
+output/
+outputs/
+work_*/
+examples/
+Notebooks/
+sample_results/
+*.mp3
+*.wav
+*.mp4
+*.png
+*.jpg
+*.jpeg
+*.ass
+
+# ── ...except the committed README media (compressed previews) ────────────────
+!docs/media/**/*.mp4
+!docs/media/**/*.jpg
+!docs/media/**/*.png
+!docs/media/*.gif
+
+# ── Benchmark run artifacts (the harness + findings ARE committed) ────────────
+bench/*.log
+bench/*.jsonl
+bench/out_*/
+bench/*.sqlite
+bench/bench_folder_id.txt
+
+# ── IDEs / OS ─────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

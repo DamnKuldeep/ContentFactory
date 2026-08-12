@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: tests & import check
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      # Base deps only. The GPU stages (Fish / FLUX.2 / ACE-Step) pull tens of GB of
+      # weights and conflicting pins into per-stage venvs -- see scripts/setup_*.py --
+      # so CI covers the orchestration layer, which is where the logic lives.
+      - name: Install base dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Byte-compile everything (syntax check across all stages)
+        run: python -m compileall -q run.py shared stages scripts social review_app research tests
+
+      - name: Import the orchestration layer
+        run: |
+          python -c "
+          import run
+          from shared import config, manifest, drive, drive_db, llm, subtitles, utils, worker
+          from shared.manifest import STAGE_SEQUENCE
+          assert len(STAGE_SEQUENCE) == 5, STAGE_SEQUENCE
+          print('orchestration layer imports cleanly')
+          "
+
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
