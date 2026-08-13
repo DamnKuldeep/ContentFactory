@@ -21,8 +21,10 @@ OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
 
 DRIVE_SA_KEY_PATH = os.environ.get("DRIVE_SA_KEY_PATH", "./drive_sa_key.json")
-# Target Drive folder. Defaults to the gdrive_tool.py FOLDER_ID so a fresh clone works out of box.
-DRIVE_PARENT_FOLDER_ID = os.environ.get("DRIVE_PARENT_FOLDER_ID", "") or "11b1Se2OA5cm8qyA2rteNH4_L9fuKaIeV"
+# The Drive folder everything gets written to. No default on purpose — an unset value makes
+# get_drive_client() log "uploads disabled" and hand back None, which is a much clearer failure
+# than silently writing into somebody else's folder.
+DRIVE_PARENT_FOLDER_ID = os.environ.get("DRIVE_PARENT_FOLDER_ID", "").strip()
 
 # OAuth installed-app login (refresh-only on workers). Copy these two files to every machine;
 # authorization is done ONCE via scripts/drive_auth.py and never again. Empty → auto-resolve

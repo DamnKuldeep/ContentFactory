@@ -10,20 +10,26 @@ pinned: false
 
 # Video Review Queue
 
-Reviewers log in, get a random **pending** video, and **Approve** or **Reject (+reason)**. State
-lives in a Google Sheet; approved videos enter the upload queue (drained by the local uploader at
-1/platform/3-4 h). The header shows live queue counts.
+A small Gradio app for checking generated videos before anything gets posted. Log in, watch a random pending video, approve it or reject it with a reason. Approved ones go into the upload queue, which a local uploader drains at one post per platform every few hours. The header shows how many are waiting.
 
-## Deploy free on Hugging Face Spaces
-1. Create a **Gradio** Space; upload `app.py`, `sheet.py` (copy of `social/sheet.py`), `requirements.txt`.
-2. Space **Settings → Secrets**:
-   - `SHEET_ID` — the spreadsheet id (from `seed_sheet.py`).
-   - `GOOGLE_TOKEN_JSON` — full contents of `token.json` (OAuth token with Drive + Sheets scope).
-   - `REVIEW_USERS` — `alice:pw1,bob:pw2` (each name is recorded as approver/rejecter).
-   - optional `SHEET_TAB` (default `videos`).
-3. The Space boots, prompts for login, and serves the queue.
+All the state lives in a Google Sheet, so there's no database to run and reviewers don't need accounts on anything.
 
-## Run locally
+## Hosting it free on Hugging Face Spaces
+
+1. Make a **Gradio** Space and upload `app.py`, a copy of `social/sheet.py`, and `requirements.txt`.
+2. Under **Settings → Secrets**, add:
+   - `SHEET_ID` — the spreadsheet id that `seed_sheet.py` printed
+   - `GOOGLE_TOKEN_JSON` — the whole contents of `token.json` (needs Drive + Sheets scope)
+   - `REVIEW_USERS` — `alice:pw1,bob:pw2`. Whichever name they log in with gets recorded as the reviewer.
+   - `SHEET_TAB` — optional, defaults to `videos`
+3. It boots, asks for a login, and starts serving the queue.
+
+## Running it locally
+
 ```bash
-SHEET_ID=... REVIEW_USERS=admin:admin ../.venv_review/bin/python app.py   # from review_app/, token.json auto-found
+SHEET_ID=... REVIEW_USERS=admin:admin python app.py
 ```
+
+From inside `review_app/`, it finds `token.json` on its own.
+
+Full write-up of the review and posting flow: [docs/PUBLISHING.md](../docs/PUBLISHING.md).

@@ -1,19 +1,17 @@
-# Deployment runbooks
+# What each stage wants
 
-Per-stage hardware requirements, expected throughput, and stage-specific troubleshooting. These
-complement the general operations guide in [RUNME.md](../RUNME.md) — read that first for setup, auth,
-and run commands.
+Hardware, throughput and the stage-specific gotchas. Read [RUNME.md](../RUNME.md) first for setup and how to actually run things — these are just the per-stage notes.
 
-| Stage | Runbook | Needs | Rough cost per video |
+| Stage | Notes | Needs | Roughly |
 |---|---|---|---|
-| 1 · story | [stage_01.md](stage_01.md) | CPU + OpenRouter API | ~14 min wall, ~$0.10, no GPU |
-| 2 · narration | [stage_02.md](stage_02.md) | NVIDIA GPU (Fish S2 Pro NF4 + WhisperX) | ~170 GPU-s (~60 s with `FISH_COMPILE`) |
-| 3 · images | [stage_03.md](stage_03.md) | NVIDIA GPU 24 GB+ (FLUX.2-klein) | ~120 GPU-s for 34 scenes |
-| 4 · music | [stage_04.md](stage_04.md) | NVIDIA GPU 24 GB+ (Qwen2.5-Omni + ACE-Step) | ~81 GPU-s |
-| 5 · compose | [stage_05.md](stage_05.md) | CPU + ffmpeg (NVENC optional) | ~119 s wall, ~0 GPU |
+| 1 · story | [stage_01.md](stage_01.md) | CPU and an API key | 13.6 min, ~$0.10, no GPU |
+| 2 · narration | [stage_02.md](stage_02.md) | GPU, ~10 GB VRAM | 170 GPU-s, or 60 s with the compile flag |
+| 3 · images | [stage_03.md](stage_03.md) | GPU, 24 GB is comfortable | 120 GPU-s for 34 scenes |
+| 4 · music | [stage_04.md](stage_04.md) | GPU, 24 GB | 81 GPU-s |
+| 5 · video | [stage_05.md](stage_05.md) | CPU and ffmpeg, NVENC helps | 2 min, no GPU needed |
 
-A typical deployment is three machines: one CPU box for stage 1, one GPU box running stages 2→3→4
-sequentially (their model stacks don't co-fit on a single 24 GB card), and a CPU box for stage 5.
-Stages 1 and 5 are the ones you'd scale horizontally first.
+A typical setup is three machines: a CPU box writing stories, a GPU box running stages 2, 3 and 4 one after the other, and a CPU box cutting video. The GPU stages have to be sequential — their model stacks won't share a 24 GB card.
 
-Measured numbers and the optimization levers behind them: [PERFORMANCE.md](../PERFORMANCE.md).
+If you want to go faster, stage 1 is the one to parallelise. It's pure API work and the slowest by wall clock, and it doesn't compete for the GPU with anything.
+
+Measured numbers and how they were arrived at: [PERFORMANCE.md](../PERFORMANCE.md).

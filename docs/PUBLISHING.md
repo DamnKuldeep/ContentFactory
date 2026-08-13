@@ -1,149 +1,113 @@
-# Review & publishing
+# Review and posting
 
-The last mile: how a finished `final.mp4` gets from Drive to a published Reel/Short, with a human
-approval gate in the middle.
+Getting a finished video from Drive onto Instagram and YouTube, with a person checking it first.
 
-> Back to the [README](../README.md) · pipeline design in [ARCHITECTURE.md](ARCHITECTURE.md)
+> [README](../README.md) · [ARCHITECTURE.md](ARCHITECTURE.md)
 
 ---
 
-## Why there's a human in the loop
+## Why there's a person in the loop
 
-The pipeline is capable of running unattended, but a generative feed with no gate is a liability — one
-bad output posted to a real account is worse than ten good ones being late. So the publish path is
-deliberately **approve-then-trickle**: a reviewer sees each video, approves or rejects it with a reason,
-and only approved videos enter a throttled upload queue.
+The pipeline can run unattended, but I didn't want it posting on its own. One bad video on a real account does more damage than ten good ones being late. So nothing gets posted until someone has actually watched it.
 
-```mermaid
-flowchart LR
-    V["finished videos<br/>manifest `videos` table<br/>+ Drive final/"]
-    V --> SEED["scripts/seed_sheet.py<br/>make public + upsert rows"]
-    SEED --> SHEET[("Google Sheet<br/>single source of truth")]
-    SHEET <--> APP["review_app/<br/>Gradio queue<br/>(HF Space)"]
-    APP -->|"❌ reject + reason"| REJ["status = rejected"]
-    APP -->|"✅ approve"| INQ["status = in_queue<br/>ig_status/yt_status = queued"]
-    SHEET --> UP["social/uploader.py<br/>throttled drain"]
-    UP -->|"≤ 1 / 4 h"| IG["Instagram Reel<br/>instagrapi"]
-    UP -->|"≤ 1 / 4 h"| YT["YouTube Short<br/>Data API v3"]
-    UP --> DONE["both posted<br/>→ status = uploaded"]
-
-    style APP fill:#3d3320,stroke:#8a7340,color:#fff
-    style UP fill:#20303d,stroke:#40708a,color:#fff
-    style SHEET fill:#1d2b3a,stroke:#4a7ab0,color:#fff
+```
+   finished          Google           review          approved         posted
+    video    ──►     Sheet    ──►      app     ──►     queue    ──►    1 per platform
+  (in Drive)                       approve /                          per 4 hours
+                                    reject
 ```
 
-**A Google Sheet is the database.** That is a deliberate choice, not a shortcut: reviewers need no
-accounts, no VPN, and no schema migration, the state is inspectable and editable by a non-engineer, and
-the same rows are readable from a laptop uploader and a hosted web app without standing up a backend.
+**The Google Sheet is the database.** That sounds like a shortcut, and it isn't. Reviewers need no account, no login and no VPN. The state is a spreadsheet anyone can read, sort or fix by hand. And the same rows work from a laptop uploader and a hosted web app without me running a backend for either.
 
 ---
 
-## Components
+## The pieces
 
-| Path | Role |
+| File | Job |
 |---|---|
-| `scripts/seed_sheet.py` | One-time (idempotent) seed: for each finished video in a batch, make the Drive file anyone-with-link and upsert a row. Re-running only fills identity columns — it never clobbers a review decision. |
-| `social/sheet.py` | All Sheet I/O. Standalone (only `gspread` + `google-auth`) so it can be bundled into the hosted app. Auth reuses the pipeline's OAuth token, from a file **or** from `GOOGLE_TOKEN_JSON` for hosted secrets. |
-| `review_app/app.py` | Gradio review queue: login, random pending video embedded from Drive, Approve / Reject (+reason) / Skip, live queue counts. |
-| `social/metadata.py` | Generates the description + 12–20 story-specific hashtags + a YouTube title, from the story's own logline and script (fetched from the stage-1 JSON in Drive). Runs **locally** inside the uploader, so the OpenRouter key never reaches the hosted app. |
-| `social/uploader.py` | The throttled drain. Per platform per cycle: if the gate is open and a not-yet-posted approved video exists, take the oldest → ensure metadata → download → post → mark the Sheet. |
-| `social/ig_adapter.py` | Instagram Reel upload via `instagrapi`, with a persisted session. |
-| `social/yt_adapter.py` | YouTube Short upload via the official Data API v3 resumable upload. |
+| `scripts/seed_sheet.py` | Takes finished videos, makes them link-shareable, adds a row each. Safe to re-run — it only fills in identity columns, never overwrites someone's review decision. |
+| `social/sheet.py` | All the Sheet reading and writing. Only needs `gspread` and `google-auth` so it can be dropped into the hosted app. Reads the OAuth token from a file *or* from an env var, for hosting secrets. |
+| `review_app/app.py` | The Gradio app. Log in, watch a random pending video, approve or reject with a reason, skip. Shows live queue counts. |
+| `social/metadata.py` | Writes the description, 12–20 hashtags and a YouTube title from the story's own logline and script. Runs locally inside the uploader, so the OpenRouter key never goes near the hosted app. |
+| `social/uploader.py` | The throttled drain. Per platform: if the gate's open and something's waiting, take the oldest, get its metadata, download, post, update the Sheet. |
+| `social/ig_adapter.py` | Instagram Reels via `instagrapi`, with a saved session. |
+| `social/yt_adapter.py` | YouTube Shorts via the official Data API. |
 
 ---
 
-## Sheet schema
+## What's in the Sheet
 
-One row per video, keyed by `(batch_id, story_num)`.
+One row per video, keyed on batch + story number.
 
-| Column | Meaning |
+| Columns | For |
 |---|---|
-| `batch_id`, `story_num` | Identity — matches the pipeline manifest |
-| `title`, `drive_file_id`, `video_url` | Where the video is |
+| `batch_id`, `story_num` | Matching it back to the pipeline |
+| `title`, `drive_file_id`, `video_url` | Where the video lives |
 | `status` | `pending` → `in_queue` → `uploaded`, or `rejected` |
-| `rejection_reason`, `reviewer`, `updated_at` | Audit trail — who decided what, when, and why |
-| `description`, `hashtags` | Generated once, then reused (cached in the Sheet) |
-| `ig_status`, `ig_url`, `ig_posted_at` | Per-platform: `""` → `queued` → `posted` / `failed` |
+| `rejection_reason`, `reviewer`, `updated_at` | Who decided what, when, and why |
+| `description`, `hashtags` | Generated once, then reused |
+| `ig_status`, `ig_url`, `ig_posted_at` | `""` → `queued` → `posted` or `failed` |
 | `yt_status`, `yt_url`, `yt_posted_at` | Same for YouTube |
 
-**Lifecycle:** a video is `pending` until a reviewer acts. Approval sets `status=in_queue` and both
-platform states to `queued`. The uploader flips each platform to `posted` independently; when *both*
-are posted, `status` becomes `uploaded`. Nothing is ever posted twice, because the uploader only
-selects rows whose per-platform status isn't already `posted`.
+A video sits at `pending` until someone looks at it. Approving flips it to `in_queue` and marks both platforms `queued`. The uploader moves each platform independently, and once both say `posted` the row becomes `uploaded`. Nothing can post twice because the uploader only picks rows whose platform status isn't already `posted`.
 
 ---
 
 ## Throttling
 
-Both platforms penalise burst posting, so the uploader enforces **at most one post per platform per
-`UPLOAD_INTERVAL_HOURS`** (default 4). The gate is computed from the newest `*_posted_at` in the Sheet,
-not from in-process state — which means:
+Both platforms hate bursts, so the uploader posts at most once per platform per `UPLOAD_INTERVAL_HOURS` (default 4).
 
-- the uploader is **stateless and idempotent**; killing it loses nothing,
-- it can run intermittently (whenever the laptop is on) and still respect the pacing,
-- two copies running by accident won't double-post, because the gate and the "not yet posted" filter are
-  both read from the shared Sheet.
+The important bit: it works out whether the gate is open by reading the newest `*_posted_at` in the Sheet, not by remembering anything. Which means you can kill it whenever, restart it, only run it when your laptop happens to be on — and it still paces itself correctly. Two copies running by accident won't double-post either, since both read the same gate and the same "not yet posted" filter.
 
 ```bash
-# Full offline rehearsal — exercises queue + throttle + Sheet writes, posts nothing, calls no LLM
+# Rehearsal — exercises the queue, the throttle and the Sheet writes. Posts nothing, calls no LLM.
 python social/uploader.py --once --dry-run
 
-# Live: check every 30 min, post when a platform's gate is open
+# Live — check every 30 minutes, post when a platform's gate opens
 python social/uploader.py --loop --interval-hours 4
 ```
 
 ---
 
-## Setup
+## Setting it up
 
-### 1. Seed the Sheet
+### Seed the Sheet
 
-The OAuth token needs the Sheets scope as well as Drive (`shared/drive.py` requests both; re-run
-`scripts/drive_auth.py` once if your token predates that).
+Your OAuth token needs the Sheets scope as well as Drive. `shared/drive.py` asks for both, so if your token predates that, run `scripts/drive_auth.py` again.
 
 ```bash
 python scripts/seed_sheet.py --batch <batch_id>
-#   → creates the spreadsheet if SHEET_ID is unset and prints the id to put in .env
-python scripts/seed_sheet.py --batch <batch_id> --no-public   # skip make-public
+#   creates the spreadsheet if SHEET_ID isn't set, and prints the id to put in .env
+python scripts/seed_sheet.py --batch <batch_id> --no-public   # skip making files shareable
 ```
 
-### 2. Deploy the review app
+### Deploy the review app
 
-Free on Hugging Face Spaces — create a **Gradio** Space and upload `review_app/app.py`,
-a copy of `social/sheet.py`, and `review_app/requirements.txt`. Then set Space secrets:
+It runs free on a Hugging Face Space. Make a Gradio Space and upload `review_app/app.py`, a copy of `social/sheet.py`, and `review_app/requirements.txt`. Then set these secrets:
 
-| Secret | Value |
+| Secret | What |
 |---|---|
-| `SHEET_ID` | The spreadsheet id printed by `seed_sheet.py` |
-| `GOOGLE_TOKEN_JSON` | The full contents of `token.json` (Drive + Sheets scope) |
-| `REVIEW_USERS` | `alice:pw1,bob:pw2` — each login name is recorded as the approver/rejecter |
+| `SHEET_ID` | The id `seed_sheet.py` printed |
+| `GOOGLE_TOKEN_JSON` | The whole contents of `token.json` |
+| `REVIEW_USERS` | `alice:pw1,bob:pw2` — the login name gets recorded as the reviewer |
 | `SHEET_TAB` | Optional, defaults to `videos` |
 
-Or run it locally:
+Or just run it locally:
 
 ```bash
 SHEET_ID=... REVIEW_USERS=admin:admin python review_app/app.py
 ```
 
-### 3. Platform credentials
+### Platform credentials
 
-**YouTube** — official, IP-agnostic, ToS-compliant. Needs its own OAuth token with the
-`youtube.upload` scope for the channel owner (this is *not* the Drive token). Provide via
-`YT_TOKEN_PATH` or `YT_TOKEN_JSON`. Quota: `videos.insert` costs ~1600 units of a 10,000/day default,
-so ~6 uploads/day — comfortably above the 1-per-4-hours pacing.
+**YouTube** is the easy one — official API, works from anywhere, no ToS problem. It needs its own OAuth token with the `youtube.upload` scope for whoever owns the channel. This is *not* the Drive token. Point `YT_TOKEN_PATH` or `YT_TOKEN_JSON` at it. An upload costs about 1600 of your 10,000 daily quota units, so roughly six a day, which is well above one-per-four-hours.
 
-**Instagram** — `instagrapi` is **unofficial and against Instagram's Terms of Service**. It logs in as a
-real account. If you use it: point it at a burner account, keep the throttle on, and run it from a
-residential IP (a laptop) — datacenter logins get challenged and blocked. Credentials via `IG_USERNAME`
-/ `IG_PASSWORD`; the session is persisted to `social/.ig_session.json` (gitignored) so it doesn't
-re-login every run. The adapter is imported lazily, so the rest of the system works without
-`instagrapi` installed at all.
+**Instagram** is the awkward one. `instagrapi` is unofficial and against Instagram's terms — it logs in as a real account. If you use it: point it at a burner, keep the throttle on, and run it from a home connection. Datacenter logins get challenged and blocked fast. Credentials go in `IG_USERNAME` and `IG_PASSWORD`; the session is saved to `social/.ig_session.json` (gitignored) so it isn't logging in every run. It's imported lazily, so everything else works fine without `instagrapi` installed at all.
 
 ---
 
-## Failure handling
+## When something fails
 
-- A failed post writes `*_status = failed` plus a truncated error into the Sheet and moves on; the next
-  cycle simply retries that platform (the row is still `in_queue` and not `posted`).
-- The downloaded mp4 is always removed in a `finally` block, so a crash can't fill the disk.
-- Metadata generation is cached in the Sheet — a retry never pays for a second LLM call.
+A failed post writes `failed` and a truncated error into the Sheet and moves on. Next cycle just tries again, because the row is still `in_queue` and still not `posted`.
+
+The downloaded video gets deleted in a `finally` block, so a crash can't slowly fill your disk. And metadata is cached in the Sheet, so a retry never pays for a second LLM call.

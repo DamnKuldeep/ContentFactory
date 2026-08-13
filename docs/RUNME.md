@@ -1,72 +1,64 @@
-# Runbook
+# Running it
 
-Provision a node, authorize Drive once, configure, run, resume, reset.
+Setting up a machine, authorising Drive once, and every way to run the thing.
 
-> Design behind this: **[ARCHITECTURE.md](ARCHITECTURE.md)** · overview: **[README](../README.md)**
+> For why it's built this way, see [ARCHITECTURE.md](ARCHITECTURE.md). For what it produced, [RESULTS.md](RESULTS.md).
 
-> All commands run **from the repo root**. Per-stage virtualenvs are created one level *above* the
-> repo, so they activate as `../.venv_<stage>/bin/activate`.
+Run everything from the repo root. The per-stage venvs get created one level *up*, so you'll activate them as `../.venv_<stage>/bin/activate`.
 
-## Contents
-1. [Prerequisites](#1-prerequisites)
-2. [One-time Google Drive authorization](#2-one-time-google-drive-authorization)
-3. [Configure `.env`](#3-configure-env)
-4. [Per-node setup](#4-per-node-setup-venv--deps--models)
-5. [Run — bulk mode (recommended)](#5-run--bulk-mode-recommended)
-6. [Run — staged mode](#6-run--staged-mode)
-7. [Run — single machine / local](#7-run--single-machine--local)
-8. [Toggles & options](#8-toggles--options)
-9. [Resume, retry & verify](#9-resume-retry--verify)
-10. [Reset](#10-reset)
-11. [Publishing](#11-publishing)
-12. [Troubleshooting](#12-troubleshooting)
+1. [What you need](#what-you-need)
+2. [Authorising Drive, once](#authorising-drive-once)
+3. [The .env file](#the-env-file)
+4. [Setting up a machine](#setting-up-a-machine)
+5. [Normal use: bulk workers](#normal-use-bulk-workers)
+6. [When you want control: staged mode](#when-you-want-control-staged-mode)
+7. [One machine, no Drive](#one-machine-no-drive)
+8. [Every flag](#every-flag)
+9. [Resuming and retrying](#resuming-and-retrying)
+10. [Starting over](#starting-over)
+11. [Posting](#posting)
+12. [When things go wrong](#when-things-go-wrong)
 
 ---
 
-## 1. Prerequisites
+## What you need
 
-- **Python 3.10+** on every machine (the setup scripts build per-stage virtualenvs with it).
-- **ffmpeg** on the compose node (`sudo apt-get install -y ffmpeg`).
-- **NVIDIA GPU** for stages 2 (Fish), 3 (FLUX.2), 4 (ACE-Step) — 24 GB recommended. Stages 1 and 5 are
-  CPU-friendly.
-- **OpenRouter API key** with credit (stage 1 only; stages 2–5 use local models).
-- **Google Drive**: an OAuth *Desktop* client `credentials.json` from the Google Cloud console, and a
-  target folder id.
-- **ACE-Step 1.5** repo + checkpoints provisioned out-of-band for stage 4 (`ACE_REPO_DIR`,
-  `ACE_CHECKPOINTS`).
+- **Python 3.10+** everywhere.
+- **ffmpeg** on whichever machine does stage 5 (`sudo apt-get install -y ffmpeg`).
+- **An NVIDIA GPU** for stages 2, 3 and 4. 24 GB is comfortable; less and you'll be fighting VRAM. Stages 1 and 5 are happy on CPU.
+- **An OpenRouter key** with credit. Only stage 1 uses it.
+- **A Google OAuth desktop client** (`credentials.json` from the Cloud console) and a Drive folder to write into.
+- **ACE-Step 1.5** cloned with its checkpoints somewhere, for stage 4.
 
-Clone the repo on each machine. You do **not** install every stage's deps everywhere — each node runs
-only its own stage's setup script.
+Clone the repo on each machine. You don't install everything everywhere — each box only runs the setup for the stages it's doing.
 
 ---
 
-## 2. One-time Google Drive authorization
+## Authorising Drive, once
 
-Authorization is interactive **exactly once**, on any machine with a browser:
+This is the only interactive step, and you do it once on a machine with a browser:
 
 ```bash
 python scripts/drive_auth.py
-# opens a browser → approve → writes token.json next to credentials.json
+# browser opens → approve → writes token.json next to credentials.json
 ```
 
-Then copy **two files** to every other machine (they are gitignored — keep them out of the repo):
+Then copy two files to every other machine:
 
 ```
-credentials.json   token.json
+credentials.json
+token.json
 ```
 
-The pipeline is **refresh-only**: it loads `token.json`, silently refreshes the access token, and never
-opens a browser. Worker machines therefore never prompt for login. (Desktop OAuth refresh tokens are
-not machine-bound, so the same `token.json` works everywhere.)
+Those are gitignored, so don't worry about them ending up in a commit. After this, no machine will ever ask you to log in again — the worker code only refreshes a token that's already there, and physically can't open a browser.
 
-The requested scopes are Drive **and** Sheets — the Sheets scope is what the review queue
-([PUBLISHING.md](PUBLISHING.md)) uses. If your token predates that, re-run `drive_auth.py`.
+The scopes include Sheets as well as Drive, because the review queue needs it. If your token is older than that change, just run `drive_auth.py` again.
 
 ---
 
-## 3. Configure `.env`
+## The .env file
 
-Copy `.env.example` to `.env` and fill it in. Minimum for a distributed run:
+Copy `.env.example` to `.env` and fill it in. The minimum for a multi-machine run:
 
 ```dotenv
 OPENROUTER_API_KEY=sk-or-...
@@ -74,227 +66,209 @@ OPENROUTER_API_KEY=sk-or-...
 DRIVE_PARENT_FOLDER_ID=<your folder id>
 DRIVE_CLIENT_SECRETS=/abs/path/credentials.json
 DRIVE_TOKEN_PATH=/abs/path/token.json
-DRIVE_DB=1                                   # manifest lives in Drive (distributed)
+DRIVE_DB=1                                   # keep the job database in Drive
 
-NARRATION_ENGINE=fish                        # fish (default) | elevenlabs
-BGM_TWO_PASS=1                               # set 0 on a 24 GB GPU
+NARRATION_ENGINE=fish                        # or elevenlabs
+BGM_TWO_PASS=1                               # set 0 on a 24 GB card
 BGM_LOUDNESS_RATIO=0.42
 HF_HOME=/abs/path/ContentFactory/models/hf_cache
 DB_PATH=manifest.sqlite
 
-FISH_COMPILE=1                               # measured ~2.1x faster TTS in bulk mode
+FISH_COMPILE=1                               # roughly halves TTS time in bulk mode
 FLUX_COMPILE=1
-FLUX_COMPILE_MODE=default                    # never "reduce-overhead" on 24 GB
+FLUX_COMPILE_MODE=default                    # never reduce-overhead on 24 GB
 ```
 
-`shared/config.py` loads this before any HuggingFace import, so `HF_HOME` reliably points every stage at
-the same repo-local weight cache.
+`shared/config.py` reads this before anything imports HuggingFace, which is how `HF_HOME` reliably points every stage at the same weights cache instead of downloading 40 GB twice.
 
 ---
 
-## 4. Per-node setup (venv + deps + models)
+## Setting up a machine
 
-Each setup script **creates a dedicated venv**, installs that stage's packages, and **downloads its
-models** into `models/hf_cache`. Per-stage venvs are intentional — Fish, FLUX.2 and ACE-Step have
-conflicting dependency pins and must not share one environment.
+Each script builds a venv, installs that stage's packages, and downloads its models into `models/hf_cache`.
 
-| Node | Command | Creates | Downloads |
-|------|---------|---------|-----------|
-| Story (1) | `python scripts/setup_story.py` | `../.venv_story` | — (CPU, LLM API) |
-| Narration (2) | `python scripts/setup_narration.py` | `../.venv_narration` | Fish S2 Pro + WhisperX (also patches the Fish repo) |
-| Images (3) | `python scripts/setup_images.py` | `../.venv_images` | FLUX.2-klein (~23 GB) |
-| Music (4) | `python scripts/setup_bgm.py` | `../.venv_bgm` | Qwen2.5-Omni (~21 GB), validates ACE-Step |
-| Compose (5) | `python scripts/setup_compose.py` | `../.venv_compose` | — (needs system ffmpeg) |
+| Machine does | Run | Makes | Downloads |
+|---|---|---|---|
+| Stories | `python scripts/setup_story.py` | `../.venv_story` | nothing — it's all API |
+| Narration | `python scripts/setup_narration.py` | `../.venv_narration` | Fish S2 Pro + WhisperX, and patches the Fish repo |
+| Images | `python scripts/setup_images.py` | `../.venv_images` | FLUX.2-klein, ~23 GB |
+| Music | `python scripts/setup_bgm.py` | `../.venv_bgm` | Qwen2.5-Omni, ~21 GB. Checks ACE-Step is where you said. |
+| Compose | `python scripts/setup_compose.py` | `../.venv_compose` | nothing, but wants system ffmpeg |
 
-Notes:
+Separate venvs isn't fussiness. Fish, FLUX.2 and ACE-Step pin conflicting versions of the same packages and simply cannot share an environment.
 
-- Run a setup script with any `python3`; it builds the venv and installs/downloads using the venv's
-  python. First-run downloads are tens of GB — let them finish.
-- Setup is **idempotent** — re-running re-uses the venv and skips cached weights.
-- `torch.compile` and model loading are CPU-RAM heavy. Close other large applications so the worker
-  isn't OOM-killed.
+Run these with any `python3`; each one builds its venv and then installs using that venv's python. First run downloads tens of gigabytes, so give it time. Re-running is safe — it reuses the venv and skips weights it already has.
+
+One thing to watch: `torch.compile` and model loading are hungry for *system* RAM, not just VRAM. Close your browser before a long run or the worker may get OOM-killed by the kernel.
 
 ---
 
-## 5. Run — bulk mode (recommended)
+## Normal use: bulk workers
 
-Seed once, then run one draining worker per role. No batch IDs, no coordinator. Each worker loads its
-model **once** and processes every video whose upstream stage is complete — which is what makes
-`FISH_COMPILE`/`FLUX_COMPILE` worth enabling.
+Seed once, then run a worker per role. Each one loads its model a single time and works through everything ready.
 
 ```bash
-# ── CPU / story box: seed N videos across ALL stages and generate the stories
+# story box — seed 150 videos across all stages, then write the stories
 python scripts/produce.py --count 150
 
-# ── GPU box: run each role in its own venv, sequentially (the stacks don't co-fit on one GPU)
+# GPU box — one role at a time, each in its own venv
 source ../.venv_narration/bin/activate && python scripts/worker.py narration
 source ../.venv_images/bin/activate    && python scripts/worker.py images
 source ../.venv_bgm/bin/activate       && python scripts/worker.py music
 
-# ── CPU box (or the GPU box, for NVENC): compose
+# compose box
 source ../.venv_compose/bin/activate   && python scripts/worker.py compose
 ```
 
-Each `worker.py <role>` loop: `sync_pull` the Drive DB → `claim_ready_job` (atomic; only jobs whose
-predecessor is `COMPLETE`) → process → `sync_push` → repeat until nothing is ready, then exit.
+Each worker: pull the database from Drive, claim a job whose previous stage is done, do it, push back, repeat. When nothing's left it exits.
 
-| Flag | Effect |
-|------|--------|
-| `--watch` | Wait for upstream work instead of exiting when idle |
-| `--poll N` / `--max-idle N` | Poll interval and how many empty polls before giving up |
-| `--max N` | Process at most N jobs then exit (e.g. `--max 1` for a smoke test) |
-| `--no-drive` | Local-only; skip the Drive DB |
+| Flag | Does |
+|---|---|
+| `--watch` | Wait around for upstream work instead of quitting when idle |
+| `--poll N` / `--max-idle N` | How long between checks, and how many empty checks before giving up |
+| `--max N` | Stop after N jobs. `--max 1` is a good smoke test. |
+| `--no-drive` | Local only |
 
-It is crash-safe and resumable: re-run a role and it claims only what's left.
+Kill it whenever. Re-run it and it picks up only what's left.
 
 ---
 
-## 6. Run — staged mode
+## When you want control: staged mode
 
-Explicit per-stage control with worker pools and a live progress dashboard.
+Explicit stages, worker pools, a live progress view.
 
 ```bash
-# Machine 1 — story (prints the batch id; copy it)
+# machine 1 — stories. Prints a batch id; copy it.
 source ../.venv_story/bin/activate
 python run.py --stage 1 --count 5 --drive-db
 
-# Machine 2 — media, in order, each in its own venv
+# machine 2 — narration, images, music, in that order
 source ../.venv_narration/bin/activate && python run.py --stage 2 --batch <id> --drive-db --workers 1
 source ../.venv_images/bin/activate    && python run.py --stage 3 --batch <id> --drive-db --workers 1
 source ../.venv_bgm/bin/activate       && python run.py --stage 4 --batch <id> --drive-db --workers 1
 
-# Machine 3 — compose
+# machine 3 — compose
 source ../.venv_compose/bin/activate
 python run.py --stage 5 --batch <id> --drive-db --workers 1
 ```
 
-Each command does one `sync_pull` at start (so it sees upstream completions) and one `sync_push` at the
-end (publishing its rows for the next machine). Use `--workers 1` for GPU stages.
+Each command pulls the database once at the start (so it sees what upstream finished) and pushes once at the end (so the next machine can see its work). Use `--workers 1` on GPU stages.
 
-### Resume on another machine
+### Picking up on a different machine
 
 ```bash
 python run.py --resume --stages 4 5 --batch <id>
 ```
 
-`--resume` implies `--drive-db`: it pulls the shared DB, resets stale jobs, prints a pending summary,
-then runs only the still-`PENDING` work for the given stages, pulling artifacts from Drive. It requires
-`--batch` and a Drive client. Stages always execute in dependency order regardless of the order you
-list them (`--stages 5 4` → 4 then 5).
+`--resume` implies `--drive-db`. It pulls the database, releases anything stuck, tells you what's still pending, and runs only that. Needs a batch id and Drive credentials. Stages always run in dependency order regardless of what order you type them — `--stages 5 4` still does 4 first.
 
-### Video catalog
+### What came out
 
-When stage 5 finishes a video it records `{title, link}` in the manifest's `videos` table.
+Stage 5 writes each finished video's title and link into the database.
 
 ```bash
-python run.py --list-videos --batch <id>                  # print + export videos.csv/json to Drive
-python run.py --list-videos                                # all batches
-python run.py --list-videos --batch <id> --share-public    # also set each final.mp4 to anyone-with-link
+python run.py --list-videos --batch <id>                  # print, and export videos.csv/json to Drive
+python run.py --list-videos                                # everything, all batches
+python run.py --list-videos --batch <id> --share-public    # make the files link-shareable too
 ```
 
-Links are **private by default** (`https://drive.google.com/file/d/<id>/view`) — you own the files
-(Desktop OAuth), so you can share them any time.
+Links are private by default. You own the files, so you can share them whenever.
 
 ---
 
-## 7. Run — single machine / local
+## One machine, no Drive
 
-If one machine has every dependency in one environment, you can run multiple stages in one process
-and/or skip Drive entirely:
+If you've got everything installed in one environment, you can run stages together, and skip Drive entirely:
 
 ```bash
-# all stages in one env, Drive-synced
+# everything in one env, still syncing to Drive
 python run.py --stage 1 --count 3 --drive-db
 python run.py --stages 2 3 4 5 --batch <id> --drive-db
 
-# fully local (no Drive); manifest stays in ./manifest.sqlite
+# fully local — database stays in ./manifest.sqlite
 python run.py --stage 1 --count 1
 python run.py --stages 2 3 4 5 --batch <id>
 ```
 
-> `--stages 2 3 4` in **one** process requires one environment with all deps. The per-stage-venv layout
-> is the distributed path; this is for local/all-in-one boxes.
+`--stages 2 3 4` in one process needs one environment with all the deps, which mostly means you've already solved the version conflicts yourself.
 
 ---
 
-## 8. Toggles & options
+## Every flag
 
-| Flag / env | Effect |
-|------------|--------|
-| `--stage N` / `--stages N N…` | Run one stage / several in dependency order |
-| `--count N` | Stage 1 only: number of stories (the batch size) |
-| `--batch <id>` | Required for stages 2–5; the id printed by stage 1 |
-| `--workers N` | Parallel workers (use `1` for GPU stages) |
-| `--drive-db` | Use the Drive-hosted shared DB (else local SQLite) |
-| `--resume` | Resume a batch from the Drive DB (implies `--drive-db`; needs `--batch`) |
-| `--retry-failed` | Reset `FAILED` jobs for the run's stage(s) back to `PENDING` |
-| `--list-videos` / `--share-public` | Print/export the catalog; optionally make finals public |
-| `--db-path P` | Local manifest path (default `manifest.sqlite`) |
-| `NARRATION_ENGINE` | `fish` (default) / `elevenlabs` |
-| `BGM_TWO_PASS` | `1` two-pass techC (default) / `0` single-pass — **use 0 on 24 GB** |
-| `BGM_LOUDNESS_RATIO` | BGM level vs voice (default `0.42`; lower = quieter music) |
-| `FISH_COMPILE` / `FLUX_COMPILE` | `torch.compile` opt-ins — see [PERFORMANCE.md](PERFORMANCE.md) |
-| `FLUX_COMPILE_MODE` | `default` (safe) / `reduce-overhead` (>24 GB cards only) |
-| `PROFILE_LOG=path.jsonl` | Record every step's timing for `scripts/profile_report.py` |
-
----
-
-## 9. Resume, retry & verify
-
-- **Resume** — just re-run the same command. Interrupted `RUNNING` jobs auto-reset after a timeout;
-  stage 3 also skips images already uploaded to Drive.
-- **Retry failures** — add `--retry-failed`.
-- **Verify a run**:
-  - Drive: `Batch_<id>/video_<n>/{metadata,narration,images,music,final}` populated, and
-    `manifest.sqlite` present in the parent folder.
-  - Local:
-    ```bash
-    python -c "import sys; sys.path.insert(0,'.'); from shared.manifest import Manifest; \
-    print(Manifest('manifest.sqlite').get_stats('<batch_id>'))"
-    ```
+| Flag / setting | Does |
+|---|---|
+| `--stage N` / `--stages N N…` | One stage, or several in order |
+| `--count N` | Stage 1 only — how many stories |
+| `--batch <id>` | Needed for stages 2–5 |
+| `--workers N` | Parallel workers. Use 1 on GPU stages. |
+| `--drive-db` | Keep the job database in Drive |
+| `--resume` | Continue a batch here (implies `--drive-db`) |
+| `--retry-failed` | Put failed jobs back in the queue |
+| `--list-videos` / `--share-public` | The finished-video catalog |
+| `--db-path P` | Where the local database lives |
+| `NARRATION_ENGINE` | `fish` or `elevenlabs` |
+| `BGM_TWO_PASS` | `1` for the two-pass brief, `0` for single. Use 0 on 24 GB. |
+| `BGM_LOUDNESS_RATIO` | How loud the music sits against the voice. Lower is quieter. |
+| `FISH_COMPILE` / `FLUX_COMPILE` | `torch.compile` — see [PERFORMANCE.md](PERFORMANCE.md) |
+| `FLUX_COMPILE_MODE` | `default`, or `reduce-overhead` only if you have more than 24 GB |
+| `PROFILE_LOG=path.jsonl` | Record timings for `scripts/profile_report.py` |
 
 ---
 
-## 10. Reset
+## Resuming and retrying
 
-`scripts/reset_pipeline.py` clears the Drive folder (all `Batch_*`, the shared DB, the lock) and wipes
-local state. **Destructive** — it confirms unless `--yes`.
+Re-run the same command. Jobs whose worker died get released after a timeout, and stage 3 skips images already sitting in Drive. For jobs that gave up entirely, add `--retry-failed`.
+
+To check on a batch:
 
 ```bash
-python scripts/reset_pipeline.py                       # show plan, ask y/N, trash + wipe local
-python scripts/reset_pipeline.py --yes                 # unattended (trash → recoverable from Drive Trash)
-python scripts/reset_pipeline.py --yes --permanent     # hard delete (unrecoverable)
-python scripts/reset_pipeline.py --yes --keep-local    # only touch Drive
+python -c "import sys; sys.path.insert(0,'.'); from shared.manifest import Manifest; \
+print(Manifest('manifest.sqlite').get_stats('<batch_id>'))"
+```
+
+Or just look in Drive — `Batch_<id>/video_<n>/` should have `metadata`, `narration`, `images`, `music` and `final` filling up, with `manifest.sqlite` sitting in the parent folder.
+
+---
+
+## Starting over
+
+`scripts/reset_pipeline.py` throws away the Drive folder's batches, the shared database and the lock, and wipes local state. It asks first unless you tell it not to.
+
+```bash
+python scripts/reset_pipeline.py                       # show the plan, ask y/N
+python scripts/reset_pipeline.py --yes                 # unattended, goes to Drive Trash
+python scripts/reset_pipeline.py --yes --permanent     # actually gone
+python scripts/reset_pipeline.py --yes --keep-local    # only clean Drive
 ```
 
 ---
 
-## 11. Publishing
+## Posting
 
-Seeding the review Sheet, deploying the Gradio review app, and running the throttled Instagram/YouTube
-uploader are covered in **[PUBLISHING.md](PUBLISHING.md)**.
+Seeding the review sheet, hosting the review app, and running the uploader are all in [PUBLISHING.md](PUBLISHING.md).
 
 ```bash
-python scripts/seed_sheet.py --batch <id>          # seed the review queue
-python social/uploader.py --once --dry-run         # safe rehearsal, posts nothing
+python scripts/seed_sheet.py --batch <id>
+python social/uploader.py --once --dry-run      # rehearsal, posts nothing
 python social/uploader.py --loop --interval-hours 4
 ```
 
 ---
 
-## 12. Troubleshooting
+## When things go wrong
 
-| Symptom | Fix |
-|---------|-----|
-| `No Drive token … run scripts/drive_auth.py` | Missing/expired `token.json`. Authorize once (§2) and copy it over. |
-| Drive writes go to the wrong folder | Set a real `DRIVE_PARENT_FOLDER_ID` in `.env` — the default is a fallback. |
-| Stage 2 import/load error about the tokenizer | Re-run `setup_narration.py`; it re-applies the Fish `tokenizer_config.json` + `llama.py` patches. |
-| Stage 4 "ACE repo/checkpoints missing" | Provision ACE-Step and set `ACE_REPO_DIR` / `ACE_CHECKPOINTS`. |
-| CUDA OOM in stage 3 | Use `--workers 1`; ensure `FLUX_COMPILE_MODE=default`; reduce batch size in `generate.py`. |
-| CUDA OOM in stage 4 | Set `BGM_TWO_PASS=0` — two-pass keeps Qwen and ACE-Step resident together. |
-| Worker killed with no traceback (`rc=139`) | Almost always a network/TLS race. Uploads and downloads are serialized for this reason; re-run and it resumes. |
-| Many `[SSL] record layer failure` / size-mismatch retries | The uplink is dropping TLS. Workers retry 5×, then a re-run resumes via partial-resume logic. Use a stable connection. |
-| GPU workers pull the DB and find 0 jobs | The seeder must push the **full** DAG. Use `scripts/produce.py` (it pushes all stages), not a stage-1-only push. |
-| Models re-download every run | Ensure `HF_HOME` is the same repo-local path in `.env` *and* was used at setup time. |
-| 429s from OpenRouter | Handled automatically with backoff; check the key has credit. A `403` means the key hit its total spend limit. |
-| A leftover `Batch_unknown/` folder in Drive | Residue from an old bug — safe to trash. |
+| What you see | What it is |
+|---|---|
+| `No Drive token … run scripts/drive_auth.py` | Missing or dead `token.json`. Authorise once and copy it over. |
+| Files landing in the wrong Drive folder | `DRIVE_PARENT_FOLDER_ID` isn't set in `.env`. |
+| Stage 2 blows up on the tokenizer | Re-run `setup_narration.py` — it re-applies the Fish patches. |
+| Stage 4 says the ACE repo is missing | Set `ACE_REPO_DIR` and `ACE_CHECKPOINTS` to wherever you put them. |
+| CUDA OOM in stage 3 | `--workers 1`, and make sure `FLUX_COMPILE_MODE=default`. |
+| CUDA OOM in stage 4 | `BGM_TWO_PASS=0`. Two-pass keeps Qwen and ACE-Step loaded together. |
+| Worker dies with `rc=139` and no traceback | Network race. Uploads and downloads are already serialised for this; just re-run, it resumes. |
+| Endless `[SSL] record layer failure` retries | Your connection is dropping TLS mid-transfer. Workers retry five times, then a re-run picks up where it left off. Use a stable link for long batches. |
+| GPU workers pull the database and find nothing | Seed with `scripts/produce.py`, which pushes the whole job list. Pushing only stage 1 wipes the rest. |
+| Models re-downloading every run | `HF_HOME` needs to be the same path in `.env` *and* when you ran setup. |
+| 429s from OpenRouter | Normal, handled with backoff. A `403` means the key hit its spending limit. |
+| A `Batch_unknown/` folder in Drive | Leftover from an old bug. Delete it. |

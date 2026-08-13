@@ -1,36 +1,54 @@
-# Stage 03: Image Generation Runbook
+# Stage 3 — images
 
-This node fetches the story script (`stage_01.json`) and runs FLUX.2 locally to generate all scene images. It actively calculates available VRAM to determine batch sizing (e.g. 1, 2, or 4 simultaneous images). 
+One illustration per scene, 28–40 per video, from FLUX.2-klein running locally. It checks how much VRAM the card has and picks a batch size to match.
 
-## Hardware Requirements
-- **GPU:** RTX 3090 / 4090 / 5090 (24GB+ VRAM strongly recommended)
-- **RAM:** 32GB+
-- **Disk:** 50GB+ (Required to hold the downloaded FLUX.2 diffusers model weights. Generated images are instantly uploaded and deleted, so runtime disk usage stays flat.)
-- **Network:** High-speed internet required for initial model download.
+## What it needs
 
-## Environment Variables
-See [../RUNME.md §3](../RUNME.md#3-configure-env). Auth is OAuth, refresh-only.
-- `DRIVE_PARENT_FOLDER_ID`, `DRIVE_CLIENT_SECRETS`, `DRIVE_TOKEN_PATH`, `DRIVE_DB=1`.
-- `HF_HOME`: repo-local model cache (`models/hf_cache`).
+- **GPU:** 24 GB is comfortable. 16 GB works at batch size 2, 12 GB at batch size 1.
+- **RAM:** 32 GB+
+- **Disk:** ~50 GB for the FLUX weights. Generated images are uploaded and deleted immediately, so runtime disk use stays flat.
+- **Network:** fast, and ideally stable. The first run downloads the model; every run after that uploads 30-odd PNGs per video.
 
-## Installation
+## Settings
+
+Full `.env` in [RUNME.md](../RUNME.md#the-env-file).
+
+- `FLUX_COMPILE=1` — about 18% faster
+- `FLUX_COMPILE_MODE=default` — **do not** use `reduce-overhead` on 24 GB. Its CUDA graphs reserve an extra 2.7 GB and OOM you after roughly 20 images.
+- `HF_HOME`, plus the usual Drive variables
+
+## Setup
+
 ```bash
-# Creates ../.venv_images, installs deps, downloads FLUX.2-klein weights into the HF cache
-python scripts/setup_images.py
+python scripts/setup_images.py    # ../.venv_images, downloads FLUX.2-klein (~23 GB)
 source ../.venv_images/bin/activate
 ```
 
-## Running the Node
+## Running
+
 ```bash
-python run.py --stage 3 --batch <id> --drive-db --workers 1
+python scripts/worker.py images                                 # bulk
+python run.py --stage 3 --batch <id> --drive-db --workers 1     # staged
 ```
-*(The node will claim pending Stage 3 jobs from the SQLite manifest. If you interrupt it via Ctrl+C, the next time it boots, it will query Google Drive to see which images were already successfully uploaded for that story and seamlessly resume without wasting compute.)*
 
-## Expected Throughput
-- **RTX 5090 (32GB VRAM):** The dynamic resizer will pick `batch_size = 4`. With 4 inference steps, expect ~1 second per image. A 50-scene story takes ~15 seconds of compute.
-- **RTX 4080 (16GB VRAM):** The dynamic resizer will pick `batch_size = 2`. Expect ~3 seconds per image.
-- **12GB GPUs:** Will fall back to `batch_size = 1`.
+Interrupt it whenever. On restart it lists what's already in the Drive images folder for that story and skips those scenes, so a half-finished render carries on instead of starting over.
 
-## Troubleshooting
-- **OOM Errors:** If CUDA Out Of Memory occurs, manually override `batch_size = 1` in `generate.py` or rent a machine with more VRAM.
-- **Model Download Failures:** The first execution will hang while HuggingFace downloads ~18GB of safetensors. Let it finish.
+## Speed
+
+Batches of 4 at 4 inference steps, on an RTX 5090 laptop:
+
+| | Time |
+|---|---|
+| Loading FLUX | ~6 s |
+| A batch of 4 images | 13.5 s, or **11.0 s with `FLUX_COMPILE=1`** |
+| 34 images total | ~115 s of GPU |
+
+Uploads used to add another 125 seconds with the GPU idle. They now happen on a background thread while the next batch renders, so that time mostly disappears.
+
+## If it goes wrong
+
+**CUDA OOM** — use `--workers 1`, check `FLUX_COMPILE_MODE=default`, or drop `BATCH_SIZE` in `generate.py`.
+
+**The first run seems to hang** — it's downloading ~23 GB of weights. Let it finish.
+
+**Lots of SSL retries or a worker dying with `rc=139`** — that's the network dropping TLS mid-upload. The upload pool is already serialised to avoid the OpenSSL race that used to crash it; just re-run and it resumes from what's already uploaded.

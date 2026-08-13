@@ -1,38 +1,59 @@
-# Stage 02: Narration Generation Runbook
+# Stage 2 — narration
 
-This node takes the completed story scripts from Stage 1 and synthesizes narration + char-level
-forced-alignment timestamps. Default engine is **Fish S2 Pro (local GPU) + WhisperX**; set
-`NARRATION_ENGINE=elevenlabs` to use the ElevenLabs API instead.
+Reads the script out loud and works out when every character of it was spoken. Default is Fish Speech S2 Pro on your own GPU with WhisperX doing the alignment. Set `NARRATION_ENGINE=elevenlabs` to use the API instead — both return the same timestamps, so nothing downstream notices.
 
-## Hardware Requirements
-- **GPU:** Required for Fish (NF4, ~10GB VRAM incl. WhisperX). None if `NARRATION_ENGINE=elevenlabs`.
-- **RAM:** 16GB+ (Fish) / 4GB+ (ElevenLabs)
-- **Disk:** ~10GB for Fish checkpoints (cached under `models/`), else negligible.
-- **Network:** Outbound internet (Google Drive; ElevenLabs if used).
+## What it needs
 
-## Environment Variables
-See [../RUNME.md §3](../RUNME.md#3-configure-env). Auth is OAuth, refresh-only (`scripts/drive_auth.py`
-once, then copy `credentials.json` + `token.json`).
-- `NARRATION_ENGINE`: `fish` (default) or `elevenlabs`.
-- `ELEVENLABS_API_KEY`: only if `elevenlabs`.
-- `DRIVE_PARENT_FOLDER_ID`, `DRIVE_CLIENT_SECRETS`, `DRIVE_TOKEN_PATH`, `DRIVE_DB=1`, `HF_HOME`.
+- **GPU:** yes for Fish, about 10 GB of VRAM including WhisperX. None at all if you're using ElevenLabs.
+- **RAM:** 16 GB for Fish, 4 GB for ElevenLabs. More if you turn on `FISH_COMPILE`, which is hungry for system RAM while it builds.
+- **Disk:** ~10 GB for the Fish checkpoints, cached under `models/`
+- **Network:** outbound to Drive, plus ElevenLabs if you're using it
 
-## Installation
+## Settings
+
+Full `.env` in [RUNME.md](../RUNME.md#the-env-file).
+
+- `NARRATION_ENGINE` — `fish` (default) or `elevenlabs`
+- `ELEVENLABS_API_KEY` — only if you picked elevenlabs
+- `FISH_COMPILE=1` — roughly halves generation time, but only worth it if this process is doing lots of videos
+- `HF_HOME`, plus the usual Drive variables
+
+## Setup
+
 ```bash
-# Creates ../.venv_narration, installs Fish+WhisperX deps, downloads checkpoints, applies patches
-python scripts/setup_narration.py
+python scripts/setup_narration.py    # ../.venv_narration, Fish + WhisperX, applies the Fish patches
 source ../.venv_narration/bin/activate
 ```
 
-## Running the Node
+The setup script patches two files in the Fish repo (`tokenizer_config.json` and `llama.py`). If stage 2 ever starts failing on a tokenizer error, just re-run setup.
+
+## Running
+
 ```bash
-python run.py --stage 2 --batch <id> --drive-db --workers 1
+python scripts/worker.py narration                              # bulk
+python run.py --stage 2 --batch <id> --drive-db --workers 1     # staged
 ```
-*(Claims pending Stage 2 jobs from the manifest until none remain; `--workers 1` for the GPU.)*
 
-## Expected Throughput
-- ~10-30 seconds per story, strictly bottlenecked by ElevenLabs API generation speed.
-- Easily scales horizontally. You can run 50 of these nodes simultaneously to chew through a backlog, provided you do not hit ElevenLabs concurrency limits.
+Use one worker. It's a single GPU.
 
-## Troubleshooting
-- **API Errors:** If ElevenLabs returns a 401/429, verify your API key and concurrency quota. The worker will naturally sleep and retry on transient failures.
+## Speed
+
+Measured on an RTX 5090 laptop with 88 seconds of narration:
+
+| | Time |
+|---|---|
+| Loading Fish | 40 s, once per process |
+| Generating audio | 128 s, or **60 s with `FISH_COMPILE=1`** once warm |
+| WhisperX transcribe + align | under 3 s |
+
+TTS is the single biggest GPU step in the whole pipeline, which is why the compile flag matters so much here.
+
+With ElevenLabs instead it's 10–30 seconds a story and scales horizontally as far as your concurrency quota allows.
+
+## If it goes wrong
+
+**Tokenizer errors on import** — re-run `setup_narration.py`.
+
+**Audio comes out suspiciously short** — the code warns about this. Fish occasionally truncates a chunk; re-running the job usually fixes it.
+
+**ElevenLabs 401 or 429** — check the key and your concurrency quota. The worker sleeps and retries.

@@ -1,38 +1,44 @@
-# Stage 01: Story Generation Runbook
+# Stage 1 — stories
 
-This node is responsible for taking base topics (from `Notebooks/` or custom generators) and turning them into full JSON scripts with narration dialogue, visual prompts, and metadata using the OpenRouter LLM APIs.
+Takes nothing and produces a JSON file per video: the story, the spoken script, 28–40 scenes with an image prompt each, character and setting sheets, and a visual style. All of it through OpenRouter, so this box does no GPU work at all.
 
-## Hardware Requirements
-- **GPU:** None (Runs on CPU)
-- **RAM:** 4GB+
-- **Disk:** 5GB+ (negligible artifact footprint since JSON is small)
-- **Network:** Requires reliable outbound internet (OpenRouter, Google Drive)
+## What it needs
 
-## Environment Variables
-See [../RUNME.md §3](../RUNME.md#3-configure-env) for the full `.env`. Auth is OAuth, refresh-only:
-authorize once via `scripts/drive_auth.py`, then copy `credentials.json` + `token.json` to each machine.
-- `OPENROUTER_API_KEY`: Required.
-- `DRIVE_PARENT_FOLDER_ID`: Master Drive folder.
-- `DRIVE_CLIENT_SECRETS` / `DRIVE_TOKEN_PATH`: OAuth credentials / token.
-- `DRIVE_DB=1`: shared manifest lives in Drive.
+- **GPU:** none
+- **RAM:** 4 GB is plenty
+- **Disk:** basically nothing — the output is a JSON file
+- **Network:** reliable outbound to OpenRouter and Drive. It makes a *lot* of API calls.
 
-## Installation
+## Settings
+
+Full `.env` in [RUNME.md](../RUNME.md#the-env-file). Authorise Drive once with `scripts/drive_auth.py`, then copy `credentials.json` and `token.json` here.
+
+- `OPENROUTER_API_KEY` — required, and needs credit
+- `DRIVE_PARENT_FOLDER_ID`, `DRIVE_CLIENT_SECRETS`, `DRIVE_TOKEN_PATH`
+- `DRIVE_DB=1` if the job database lives in Drive
+
+## Setup
+
 ```bash
-# Creates ../.venv_story and installs deps (no model downloads on stage 1)
-python scripts/setup_story.py
+python scripts/setup_story.py     # builds ../.venv_story, no model downloads
 source ../.venv_story/bin/activate
 ```
 
-## Running the Node
+## Running
+
 ```bash
-python run.py --stage 1 --count 100 --drive-db
+python scripts/produce.py --count 150            # bulk: seeds all stages, then writes stories
+python run.py --stage 1 --count 100 --drive-db   # staged: prints a batch id for the other machines
 ```
-*(`--count` = stories to seed into a new batch. The run prints the batch id for downstream machines.)*
 
-## Expected Throughput
-- ~1-3 minutes per story depending on LLaMA/Qwen API latency.
-- Negligible disk IO.
+## Speed and cost
 
-## Troubleshooting
-- **RateLimits/Timeouts:** The `shared.llm` module handles HTTP 429s automatically with exponential backoff.
-- **Empty completions:** The retry loop will attempt up to 8 times for structured JSON. If it hard fails, verify your `OPENROUTER_API_KEY` has credits.
+Measured at **~13.6 minutes and about $0.10 per story**. That's a lot of wall clock, but it's all waiting on API calls, so it's the easiest stage to scale — raise `--workers` until you start hitting rate limits.
+
+## If it goes wrong
+
+**429s and timeouts** are normal and handled with exponential backoff in `shared/llm.py`.
+
+**Empty or malformed completions** get retried up to 8 times with a JSON repair pass. If it still gives up, check the key has credit.
+
+**403 total spend limit** means the key is out of budget. Jobs get marked `FAILED` with that error; raise the limit and run with `--retry-failed`.
