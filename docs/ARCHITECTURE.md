@@ -2,7 +2,9 @@
 
 The design, the data that flows between stages, and how multiple machines share work.
 
-> Start with the [README](../README.md) if you haven't. To actually run it, [RUNME.md](RUNME.md).
+> The [README](../README.md) has an illustrated walkthrough of what happens inside each stage — the
+> critic loops, the alignment mapping, the two-pass music. This doc is the reference underneath it:
+> module by module, contract by contract. To actually run things, see [RUNME.md](RUNME.md).
 
 1. [The shape of it](#the-shape-of-it)
 2. [The five stages](#the-five-stages)

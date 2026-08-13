@@ -15,7 +15,7 @@
 
 **88 videos made in one batch** · 5 model stacks on 3 machines · **~375 GPU-seconds a video**, then 24% off that
 
-[Samples](#what-it-makes) · [How it works](#how-it-works) · [Run it](#running-it) · [The hard parts](#the-interesting-problems) · [Speed](#speed-and-cost) · [Docs](#docs)
+[Samples](#what-it-makes) · [How it works](#how-it-works) · [Run it](#running-it) · [Inside each stage](#inside-each-stage) · [Speed](#speed-and-cost) · [Docs](#docs)
 
 </div>
 
@@ -131,43 +131,194 @@ Every flag and a troubleshooting table: **[RUNME.md](docs/RUNME.md)**.
 
 ---
 
-## The interesting problems
+## Inside each stage
 
-Calling an image model is easy. These were the parts worth solving.
+The overview above is the boring version. Here's what actually happens.
 
-### Subtitles that stay in sync with a TTS that mumbles
+---
 
-Fish generates the audio, then WhisperX transcribes what it *actually said* — and those two don't match. It swallows a syllable, splits "Chacabuco" into three words, drops a filler. Zip the heard words onto the script words and the whole video drifts out of sync.
+### Stage 1 — story, script and prompts
 
-So [`fish.py`](stages/stage_02_narration/fish.py) diffs the two word lists, copies timings straight across where they match, interpolates across the bits where they don't, fills gaps between known anchors, forces the result to move forward in time, then spreads word timings down to individual characters. What comes out is the same shape ElevenLabs charges you for.
+The biggest stage by a distance, around 1,500 lines. It runs in three phases, and every phase has models checking each other's work.
 
-That per-character timeline is what everything downstream leans on. Subtitle words, scene cuts, the music's target length — all of it resolves through the same object.
+**Phase A — get a story out of nothing**
 
-### Three model stacks, one 24 GB GPU
+```mermaid
+flowchart TD
+    A["roll 7 creative dice"] --> B["turn them into one coherent direction"]
+    B --> C["write 7 competing premises"]
+    C --> D["judge scores them and picks one"]
+    D --> E["amateur interviews an expert about it"]
+    E --> F["draft the story"]
+    F --> G["critic loop"]
+    G --> H["final story, 320-600 words"]
+```
 
-Fish, FLUX.2 and ACE-Step pin conflicting versions of the same packages, so each stage gets its own virtualenv built by its own setup script — all sharing one weights cache so nothing downloads 40 GB twice.
+The dice are seven independent lists — era, region, domain, milieu, motif, flavour, structure — sampled fresh each run. A 1600s Cornish tin-mining village with a bell that rings on its own is one draw; a 1930s Ceylon tea estate with a ledger of names is another. That combination *is* the creative seed, and it's what stops a hundred videos from all sounding the same.
 
-They don't fit in VRAM together either. Stage 3 reads the card's memory and picks its batch size from that. Stage 4 explicitly evicts Qwen before ACE-Step loads, because those two won't co-exist on 24 GB.
+Premise selection uses verbalized sampling: the model writes seven premises **with a probability on each** (how likely a typical writer would be to pick it), a judge scores all seven on five axes, and the winner is sampled with weights from everything within 0.5 of the top. So the safest premise doesn't win by default, but a bad one can't sneak through either.
 
-### Making it survive a real network
+The interview is the part I like most. An "amateur" persona asks up to three questions about what actually *happens*; an "expert" persona answers with options rather than a locked plot. The amateur can call `done: true` and walk away as soon as it can picture the whole thing, so a story with an obvious shape gets one round and a murky one gets three.
 
-A few things only show up once you're running hundreds of jobs over home wifi:
+**The critic loop, which is where most of the quality comes from**
 
-- Concurrent Drive uploads race inside OpenSSL and take the process down with no traceback. The upload pool is one thread now — it still overlaps with the next batch of images, so nothing got slower.
-- Google's Drive client isn't thread-safe. Sharing one across a download pool writes 0-byte files. Downloads are serial.
-- Job claiming has to be atomic or two workers eventually take the same job. It's `UPDATE ... WHERE status='PENDING'`, and whoever gets `rowcount == 1` wins.
+```mermaid
+flowchart TD
+    D["draft"] --> C1["critic — spine and coherence"]
+    D --> C2["critic — hook and payoff"]
+    C1 --> J{"every lane satisfied?"}
+    C2 --> J
+    J -->|yes| OUT["keep this draft"]
+    J -->|no| R["retire the lanes that passed"]
+    R --> S["reconcile all issues into one ordered list"]
+    S --> T["revise, only what's on the list"]
+    T --> D
+```
 
-Uploads are size-checked against the local file and retried on mismatch. Stage 3 lists what's already in Drive before starting, so an interrupted 34-image render carries on instead of starting over.
+Each critic returns a score out of 10, a binary `satisfied`, and up to three issues — each with the **exact quote** from the draft it's complaining about and a before→after direction rather than a line to paste in. They run in parallel.
 
-### An LLM setup that argues with itself
+Four details make this converge instead of oscillate:
 
-Stage 1 isn't a prompt, it's about 1,500 lines. Generators and critics come from different model families on purpose — a model grading its own work is far too generous. Llama writes prose and grades Qwen's scene plans, Gemma grades Qwen's image prompts, and Qwen-VL stays off text critique entirely because its verdicts were unusable.
+- **Passed lanes retire.** Once a critic is satisfied it stops being asked, so each loop changes less and a fixed problem can't be re-torn-down by the next round.
+- **Raw verdicts get reconciled first.** Two critics will contradict each other. A separate editor model folds every verdict into one prioritised, non-contradictory list of changes plus an explicit *keep* list of things that are working, so the reviser doesn't break what it just fixed.
+- **A critic that can't justify itself passes.** If it returns "not satisfied" with no concrete issue, there's nothing to act on, so it's treated as a pass and logged. Same if it errors out. One flaky critic can't hold the loop hostage.
+- **The best draft is kept, not the last.** Ranked by lanes satisfied, then total score. Stored together with its verdicts so the text and its scores never drift apart.
 
-My favourite bit is the segmentation. The model doesn't rewrite the script into beats — it returns *cut positions*, and the code slices the original script at those points. So the narration can't be paraphrased even if the model tries, and a deterministic splitter tidies up the count afterwards.
+The loop runs up to four times. If everything passes and the length is in range, the final rewrite step is skipped entirely — rewriting a draft that's already working usually makes it worse.
 
-### No browsers on headless boxes
+**Phase B — the spoken script** runs the same machinery with three critics instead of two: hook and scroll-stop, plainness and spoken flow, and staying true to the source. Then a length guard, and a "name check" that catches the case where an edit introduced a character's name without ever introducing the character.
 
-A GPU box can't complete an OAuth consent screen, and a worker that opens a browser mid-batch just hangs there. So [`drive.py`](shared/drive.py) only ever refreshes a token that's already on disk — the browser flow isn't in that code path at all. You authorise once on a laptop and copy two files around.
+**Phase C — scenes and image prompts**
+
+```mermaid
+flowchart TD
+    S["final script"] --> E["extract character and setting sheets"]
+    S --> G["cut into 28-40 beats"]
+    E --> Y["pick a visual style from 6 offered"]
+    G --> P["plan a scene per beat"]
+    Y --> P
+    P --> PJ["judge and fix the plan, up to 3 rounds"]
+    PJ --> W["write an image prompt per scene, in parallel"]
+    W --> PR["review and rewrite, up to 4 rounds"]
+    PR --> O["stage_01.json"]
+```
+
+Two things here are worth calling out.
+
+**The narration can't be paraphrased.** The segmenter never rewrites anything — it's shown the script pre-split into clause-level chunks and returns only the *numbers* of the chunks that end a beat. The code then slices the original text at those positions. Even if the model hallucinates, the words that come out are the words that went in. A deterministic splitter afterwards enforces 28–40 beats at 5–24 words each.
+
+**Consistency across 34 independent image calls** comes from injecting the same locked context into every prompt: one style anchor, a fixed hex palette, and a clothing-free identity line per character kept separate from their default wardrobe, so a scene can change someone's clothes without changing their face. The prompt writer is also forbidden from using anyone's *name* — only their appearance — because names mean nothing to an image model.
+
+There's also a deterministic scrubber that strips "motion blur", "bokeh", "shallow depth of field" and friends out of every prompt. Those are photography words, and they were quietly dragging a hand-drawn style toward looking like a photo.
+
+**Who grades whom.** Generators and critics are deliberately different model families, because a model marking its own homework is far too generous:
+
+| Job | Model |
+|---|---|
+| Prose — story, script, revisions | Llama 3.3 70B |
+| Scene planning, image prompts | Qwen3-VL 32B |
+| Judges the Qwen scene planner | Llama 3.3 70B |
+| Judges the Qwen prompt writer | Gemma 4 31B |
+| Structured extraction, style choice, reconciling feedback | Gemma 4 31B |
+| Story critics | Gemma 4 + Llama 3.3 |
+
+Qwen-VL is kept off text critique entirely — its verdicts on prose were unusable, so it does what it's good at instead.
+
+---
+
+### Stage 2 — narration and the timeline everything else depends on
+
+```mermaid
+flowchart LR
+    A["script"] --> B["split into<br/>sentence chunks"]
+    B --> C["Fish generates<br/>each chunk"]
+    C --> D["concatenate"]
+    D --> E["WhisperX<br/>transcribes"]
+    E --> F["diff heard<br/>vs script"]
+    F --> G["timestamp<br/>per character"]
+```
+
+Chunking isn't a choice — Fish's context is 4096 tokens and can't hold 100 seconds of speech. Each chunk is generated independently against the same fixed reference voice, then joined.
+
+The interesting problem is that WhisperX transcribes what Fish *actually said*, which is not the script:
+
+```
+  script:  ... the dentist of Chacabuco vanished in ...
+  heard:   ... the dentist of chaca  buco  vanished in ...
+                              └── one script word, two heard ──┘
+                                  interpolate across the span
+```
+
+Zip those together naively and every subtitle after this point is wrong. So the two word lists get diffed: matching runs copy their timings straight across, mismatched runs interpolate evenly across the span, anything still unmatched is filled in between its nearest known anchors, and the whole thing is forced monotonic before being expanded down to per-character resolution.
+
+That per-character timeline is the single most load-bearing object in the pipeline. Subtitle words, scene cut times and the music's target length all resolve through it. ElevenLabs returns the same structure from its paid API, which is why swapping engines changes nothing downstream.
+
+---
+
+### Stage 3 — images without leaving the GPU idle
+
+```
+  time ──────────────────────────────────────────────►
+
+  GPU     [ generate 1-4 ][ generate 5-8 ][ generate 9-12 ]
+  network         └─ upload 1-4 ─┘└─ upload 5-8 ─┘
+```
+
+Uploading 34 images one at a time took ~125 seconds with the GPU doing nothing. They now go out on a background thread while the next batch renders.
+
+One thread, not four — four raced inside OpenSSL and killed the process with no traceback. One still overlaps with the next batch, which was the entire point of doing it.
+
+Batch size is read off the card at runtime (4 on 24 GB, 2 on 16 GB, 1 below that), and on startup the stage lists what's already in Drive for that story and skips it, so an interrupted render carries on instead of starting over.
+
+---
+
+### Stage 4 — music that argues with itself too
+
+```mermaid
+flowchart TD
+    N["finished narration"] --> E["RMS energy curve"]
+    E --> B1["Qwen writes a music brief"]
+    B1 --> A1["ACE-Step renders"]
+    A1 --> BP["the BPM and key it actually chose"]
+    BP --> B2["Qwen critiques its own brief against that"]
+    B2 --> A2["render again"]
+```
+
+The brief isn't written from the script — it's written from an RMS energy envelope pulled out of the *finished voice track* and described in words. So the music is shaped by how the narration was actually delivered, not by how the text reads.
+
+Then the second pass: ACE-Step hands back the BPM and key its own planner picked, and Qwen is shown its pass-1 brief next to that interpretation and asked where it fell short. It emits a verification plus a refined brief, and the track is rendered again.
+
+Qwen is evicted from VRAM before ACE-Step loads. They don't fit together on 24 GB, which is what `BGM_TWO_PASS=0` is for.
+
+---
+
+### Stage 5 — one FFmpeg graph
+
+```
+   images ──► fit + oversize ──► Ken Burns crop ──┐
+                                                   ├──► energy-graded xfades ──► fades ──► burn in subs ──┐
+   (34 stills, one per beat, timed from the alignment)                                                      │
+                                                                                                            ├──► h264
+   narration ──┬────────────────────────────────────────────────────────────────────► mix ─────────────────┘
+               └──► measure LUFS ──┐
+   music ──────────────────────────┴──► set to 0.42x that ──► sidechain duck under the voice ──┘
+```
+
+Everything is one filter graph — no intermediate files, no re-encodes.
+
+- **Subtitles** are one ASS line per *word state*, not per line of text. A four-word window slides along; the current word is white and slightly larger, the rest gold. Lines butt up exactly against each other so nothing flickers.
+- **Transitions** are picked per scene boundary from an energy score, and clamped to 60% of the shortest scene so a fast cut never swallows a whole beat.
+- **Audio** is the part people notice without knowing why. The music isn't set to a fixed volume — the narration's LUFS is measured and the music placed at a fraction of it, then sidechain-compressed underneath. That's why all five samples sound balanced despite having different narration levels.
+
+---
+
+### The bits that aren't a stage
+
+**No browsers on headless boxes.** A GPU box can't complete an OAuth consent screen, and a worker that opens one mid-batch hangs forever. So [`drive.py`](shared/drive.py) only ever refreshes a token already on disk — the browser flow isn't in that code path at all. You authorise once on a laptop and copy two files around.
+
+**Three model stacks that won't share an environment.** Fish, FLUX.2 and ACE-Step pin conflicting versions of the same packages, so each stage gets its own virtualenv from its own setup script, all pointing at one weights cache so nothing downloads 40 GB twice.
+
+**Uploads are verified, not assumed.** Every file is size-checked against the local copy and the upload retried on a mismatch, because a truncated PNG doesn't fail loudly — it just makes a broken video three stages later.
 
 ---
 
@@ -209,6 +360,8 @@ stateDiagram-v2
 ```
 
 A stage-3 job only becomes claimable once that same story's stage-2 job says `COMPLETE`. That's one `EXISTS` sub-query, and it is the entire scheduler — which is why `python scripts/worker.py images` needs no batch id and no coordinator. It just drains whatever's ready.
+
+Claiming has to be atomic, or two workers eventually take the same job and you pay double GPU time for one video. It's a single conditional update — `UPDATE ... WHERE id=? AND status='PENDING'` — and whoever gets `rowcount == 1` wins. The losers retry in a fresh transaction so they see the winner's commit.
 
 Full write-up: **[ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
