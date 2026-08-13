@@ -7,8 +7,8 @@ it), then upsert a row {batch_id, story_num, title, drive_file_id, video_url(/pr
 Idempotent — re-running updates existing rows (won't clobber status/reviewer of already-reviewed rows;
 it only fills identity columns).
 
-    python scripts/seed_sheet.py --batch 20260628_153812
-    python scripts/seed_sheet.py --batch 20260628_153812 --no-public   # skip make_public
+    python scripts/seed_sheet.py --batch <batch_id>
+    python scripts/seed_sheet.py --batch <batch_id> --no-public   # skip make_public
 
 Requires the OAuth token to include the Sheets scope (run scripts/drive_auth.py once after the scope
 was added). Set SHEET_ID in .env, or omit it and this creates the sheet + prints the id.

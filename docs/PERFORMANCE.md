@@ -86,26 +86,21 @@ BGM_TWO_PASS=0              # single-pass music, and required on 24 GB anyway
 
 ---
 
-## Bugs the profiling turned up
+## What profiling shook out
 
-Profiling meant running the chain end to end for the first time, which found a lot.
+Instrumenting the pipeline meant running the whole chain end to end, repeatedly, which surfaced a handful of things worth writing down.
 
-**From the first full run:**
+**The one that didn't throw an error.** Stage-1 scenes carry no character offsets, so compose mapped every scene to t≈0 and all 34 images flashed past in the first few seconds. No exception, no warning, a perfectly valid MP4 — just wrong. `compose.py` now locates each scene's narration inside the script and derives the offsets. This is the argument for actually watching your output rather than trusting a green exit code.
 
-1. `fish.py` imported `fish_speech` before the repo was on `sys.path`. Load the model first.
-2. Stage 2 wrote `meta.audio_drive_id` but stages 4 and 5 read `meta.stage_02.audio_drive_id` — and since 3→4→5 branches off stage 1, the narration data was getting dropped entirely. Fixed the key and made 4 and 5 merge stage 2's output back in.
-3. Stage 5 insisted on a `stage_04.json` in its work dir that nothing ever put there.
-4. Stage 4 OOM'd with Qwen and ACE-Step both resident.
-5. **The sync bug.** Stage-1 scenes have no character offsets, so compose mapped every scene to t≈0 and all 34 images flashed past in the first few seconds. `compose.py` now finds each scene's narration inside the script and works the offsets out.
-6. `claim_job` had no atomic guard, so two workers could take the same job.
+**Data that quietly went missing between stages.** The 3→4→5 chain branches off the stage-1 document, so it never carried stage 2's alignment. Stages 4 and 5 now explicitly fetch and merge the stage-02 JSON. Same category: nothing crashed, the video just came out wrong.
 
-**From the A/B, which was the first time the bulk path ran end to end:**
+**A bug that needs more than one machine to exist.** The seeder was pushing only stage-1 rows to the shared database, which wiped the seeded downstream rows on the next pull. On one box everything looked perfect; the GPU machines pulled the database and found nothing to do.
 
-7. `produce.py` pushed only stage-1 rows to Drive, which meant the seeded stages 2–5 got wiped from the remote on the next pull. GPU boxes would pull the database and find nothing to do. Real distributed bug, and the kind you only see with more than one machine.
-8. Stage 3 uploaded to `Batch_unknown/video_0000/` because it reads the batch and story number from the JSON, and stage 1's JSON doesn't have them. Cosmetic — downstream finds images by file ID — but it made a mess of the folders.
-9. `reduce-overhead` compile mode OOM'd FLUX after ~20 images.
-10. Concurrent Drive uploads segfaulted the FLUX worker with `rc=139` under a flaky connection. OpenSSL races across upload threads.
-11. Bench-only: `HF_HOME` pointed at an empty cache and re-downloaded 44 GB. Also tried `PYTORCH_CUDA_ALLOC_CONF=expandable_segments` as an OOM fix before realising it had nothing to do with the segfault.
+**VRAM behaviour you can't predict from docs.** `reduce-overhead` compile mode reserves ~2.7 GB of CUDA graphs and OOMs FLUX after about 20 images. Qwen and ACE-Step don't co-exist on 24 GB at all. Both are why `FLUX_COMPILE_MODE` and `BGM_TWO_PASS` are settings rather than constants.
+
+**Network races that kill the process silently.** Concurrent Drive uploads segfault with `rc=139` and no traceback, and a shared Drive client across a download pool writes 0-byte files. Both serial now.
+
+Smaller ones, for completeness: `fish.py` imported `fish_speech` before the repo was on `sys.path`; stage 5 required a file in its work dir that nothing ever put there; stage 3 uploaded to `Batch_unknown/video_0000/` because it read a batch id that stage 1's JSON doesn't carry.
 
 ---
 

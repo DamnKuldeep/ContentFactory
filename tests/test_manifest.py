@@ -92,11 +92,11 @@ class TestReadiness(ManifestTestCase):
                           "story 2's stage 2 must stay blocked while its stage 1 is unfinished")
 
     def test_a_failed_upstream_never_unblocks_downstream(self):
-        """This is what let the 100-video run skip its 12 spend-limited stories cleanly."""
+        """A story that dies in stage 1 must simply never be offered to the GPU stages."""
         self.m.seed_all_stages(BATCH, [1])
         job = self.m.claim_ready_job(S1)
         for _ in range(10):
-            self.m.fail_job(job["id"], "403 spend limit")
+            self.m.fail_job(job["id"], "upstream error")
             nxt = self.m.claim_ready_job(S1)
             if nxt is None:
                 break

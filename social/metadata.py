@@ -46,7 +46,7 @@ class SocialMeta(BaseModel):
 
 
 def generate(title: str, logline: str, script: str) -> SocialMeta:
-    """One LLM call -> SocialMeta. Requires OPENROUTER_API_KEY (raise its spend limit first)."""
+    """One LLM call -> SocialMeta. Requires OPENROUTER_API_KEY."""
     from shared.llm import init_client, call_struct
     from shared.config import OPENROUTER_API_KEY
     try:
